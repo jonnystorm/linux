@@ -198,6 +198,10 @@ int mv88e6352_g1_reset(struct mv88e6xxx_chip *chip)
 	if (err)
 		return err;
 
+	err = mv88e6xxx_g1_read(chip, MV88E6XXX_G1_CTL1, &val);
+	if(err)
+		return err;
+
 	err = mv88e6xxx_g1_wait_init_ready(chip);
 	if (err)
 		return err;
