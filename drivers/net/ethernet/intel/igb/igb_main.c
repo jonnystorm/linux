@@ -36,6 +36,7 @@
 #include <net/ip6_checksum.h>
 #include <linux/net_tstamp.h>
 #include <linux/mii.h>
+#include <linux/phy.h>
 #include <linux/ethtool.h>
 #include <linux/if.h>
 #include <linux/if_vlan.h>
@@ -256,7 +257,7 @@ MODULE_VERSION(DRV_VERSION);
 static int debug = -1;
 module_param(debug, int, 0);
 MODULE_PARM_DESC(debug, "Debug level (0=none,...,16=all)");
-
+static int igb_num = 0;
 struct igb_reg_info {
 	u32 ofs;
 	char *name;
@@ -2274,6 +2275,99 @@ static void igb_init_mas(struct igb_adapter *adapter)
 	}
 }
 
+int i350_mdio_read_pci(struct pci_dev *pdev,int phy, int reg)
+{
+
+	s16 data;
+	struct net_device *netdev = pci_get_drvdata(pdev);
+	struct igb_adapter *adapter = netdev_priv(netdev);
+	struct e1000_hw *hw = &adapter->hw;
+	igb_read_phy_reg_mdic(hw,reg,&data);
+	return data;
+}
+EXPORT_SYMBOL(i350_mdio_read_pci);
+
+int i350_mdio_write_pci(struct pci_dev *pdev,int phy, int reg, u16 val)
+{
+
+	s32 retval;
+	struct net_device *netdev = pci_get_drvdata(pdev);
+	struct igb_adapter *adapter = netdev_priv(netdev);
+	struct e1000_hw *hw = &adapter->hw;
+	retval=igb_write_phy_reg_mdic(hw,reg,val);
+	return retval;
+}
+EXPORT_SYMBOL(i350_mdio_write_pci);
+
+int igb_mdio_read(struct mii_bus *bus, int phy, int reg)
+{
+	u16 data,ret_val;
+	struct pci_dev *pdev;
+	pdev = to_pci_dev(bus->parent);
+	struct net_device *netdev = pci_get_drvdata(pdev);
+	struct igb_adapter *adapter = netdev_priv(netdev);
+	struct e1000_hw *hw = &adapter->hw;
+	ret_val=igb_read_phy_reg_mdic(hw,reg,&data);
+	if(ret_val < 0)
+		return -EINVAL;
+	return data;
+}
+
+int igb_mdio_write(struct mii_bus *bus, int phy, int reg, u16 val)
+{
+	struct pci_dev *pdev;
+	u32 retval=0;
+	pdev = to_pci_dev(bus->parent);
+	struct net_device *netdev = pci_get_drvdata(pdev);
+	struct igb_adapter *adapter = netdev_priv(netdev);
+	struct e1000_hw *hw = &adapter->hw;
+	retval=igb_write_phy_reg_mdic(hw,reg,val);
+	return retval;
+}
+
+int igb_mdio_reset(struct mii_bus *bu)
+{
+	return 0;
+}
+
+static s32 igb_init_mdio(struct igb_adapter *adapter)
+{
+	s32 status = -ENODEV;
+
+
+	if(adapter->hw.mac.type != e1000_i350)
+		return status;
+
+	adapter->igb_mdiobus = mdiobus_alloc();
+	if(!adapter->igb_mdiobus)
+		return status;
+
+	adapter->igb_mdiobus->read=igb_mdio_read;
+	adapter->igb_mdiobus->write=igb_mdio_write;
+	adapter->igb_mdiobus->reset=igb_mdio_reset;
+	adapter->igb_mdiobus->name = "igbmdio";
+	adapter->igb_mdiobus->parent = &adapter->pdev->dev;
+	snprintf(adapter->igb_mdiobus->id, MII_BUS_ID_SIZE,"i350_mdio%d",igb_num++);
+	adapter->igb_mdiobus->phy_mask = ~0;
+	status = mdiobus_register(adapter->igb_mdiobus);
+	if(status)
+	{
+		mdiobus_free(adapter->igb_mdiobus);
+	}
+	return status;
+
+}
+
+static s32 igb_remove_mdio(struct igb_adapter *adapter)
+{
+	if(adapter->igb_mdiobus)
+	{
+		mdiobus_unregister(adapter->igb_mdiobus);
+		mdiobus_free(adapter->igb_mdiobus);
+	}
+	return 0;
+}
+
 /**
  *  igb_init_i2c - Init I2C interface
  *  @adapter: pointer to adapter structure
@@ -2657,6 +2751,15 @@ static int igb_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	if (err)
 		goto err_register;
 
+	if(hw->mac.type==e1000_i350)
+	{
+		err = igb_init_mdio(adapter);
+		if (err){
+			dev_err(&pdev->dev, "failed to init mdio interface\n");
+			goto err_eeprom;
+		}
+	}
+
 	/* carrier off reporting is important to ethtool even BEFORE open */
 	netif_carrier_off(netdev);
 
@@ -2947,6 +3050,7 @@ static void igb_remove(struct pci_dev *pdev)
 	igb_sysfs_exit(adapter);
 #endif
 	igb_remove_i2c(adapter);
+	igb_remove_mdio(adapter);
 	igb_ptp_stop(adapter);
 	/* The watchdog timer may be rescheduled, so explicitly
 	 * disable watchdog from being rescheduled.

@@ -39,7 +39,7 @@ enum dsa_tag_protocol {
 	DSA_TAG_LAST,		/* MUST BE LAST */
 };
 
-#define DSA_MAX_SWITCHES	4
+#define DSA_MAX_SWITCHES	8
 #define DSA_MAX_PORTS		12
 
 #define DSA_RTABLE_NONE		-1
@@ -81,6 +81,7 @@ struct dsa_chip_data {
 	 * for switch a. Can be NULL if there is only one switch chip.
 	 */
 	s8		rtable[DSA_MAX_SWITCHES];
+	u32 tree;
 };
 
 struct dsa_platform_data {
@@ -314,6 +315,7 @@ struct dsa_switch_ops {
 				     int port, uint64_t *data);
 	int	(*get_sset_count)(struct dsa_switch *ds);
 
+	int	(*set_phys_id)(struct dsa_switch *ds, int port, enum ethtool_phys_id_state state);
 	/*
 	 * ethtool Wake-on-LAN
 	 */

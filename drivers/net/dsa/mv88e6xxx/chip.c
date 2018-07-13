@@ -40,6 +40,8 @@
 #include "port.h"
 #include "serdes.h"
 
+static u16 pleddata[4];
+
 static void assert_reg_lock(struct mv88e6xxx_chip *chip)
 {
 	if (unlikely(!mutex_is_locked(&chip->reg_lock))) {
@@ -413,8 +415,8 @@ int mv88e6xxx_wait(struct mv88e6xxx_chip *chip, int addr, int reg, u16 mask)
 {
 	int i;
 
+	u16 val;
 	for (i = 0; i < 16; i++) {
-		u16 val;
 		int err;
 
 		err = mv88e6xxx_read(chip, addr, reg, &val);
@@ -427,7 +429,7 @@ int mv88e6xxx_wait(struct mv88e6xxx_chip *chip, int addr, int reg, u16 mask)
 		usleep_range(1000, 2000);
 	}
 
-	dev_err(chip->dev, "Timeout while waiting for switch\n");
+	dev_err(chip->dev, "Timeout while waiting for switch:value read,0x%x\n",val);
 	return -ETIMEDOUT;
 }
 
@@ -3762,7 +3764,7 @@ static const char *mv88e6xxx_drv_probe(struct device *dsa_dev,
 		return NULL;
 
 	/* Legacy SMI probing will only support chips similar to 88E6085 */
-	chip->info = &mv88e6xxx_table[MV88E6085];
+	chip->info = &mv88e6xxx_table[MV88E6176];
 
 	err = mv88e6xxx_smi_init(chip, bus, sw_addr);
 	if (err)
@@ -3864,6 +3866,7 @@ static const struct dsa_switch_ops mv88e6xxx_switch_ops = {
 	.set_eeprom		= mv88e6xxx_set_eeprom,
 	.get_regs_len		= mv88e6xxx_get_regs_len,
 	.get_regs		= mv88e6xxx_get_regs,
+	.set_phys_id		= mv88e6xxx_set_phys_id,
 	.set_ageing_time	= mv88e6xxx_set_ageing_time,
 	.port_bridge_join	= mv88e6xxx_port_bridge_join,
 	.port_bridge_leave	= mv88e6xxx_port_bridge_leave,
@@ -3922,6 +3925,7 @@ static int mv88e6xxx_probe(struct mdio_device *mdiodev)
 	struct mv88e6xxx_chip *chip;
 	u32 eeprom_len;
 	int err;
+	int portnum;
 
 	compat_info = of_device_get_match_data(dev);
 	if (!compat_info)
@@ -3931,7 +3935,10 @@ static int mv88e6xxx_probe(struct mdio_device *mdiodev)
 	if (!chip)
 		return -ENOMEM;
 
-	chip->info = compat_info;
+	if(np)
+		chip->info = compat_info;
+	else
+		chip->info = &mv88e6xxx_table[MV88E6176];
 
 	err = mv88e6xxx_smi_init(chip, mdiodev->bus, mdiodev->addr);
 	if (err)
@@ -3990,6 +3997,18 @@ static int mv88e6xxx_probe(struct mdio_device *mdiodev)
 	if (err)
 		goto out_mdio;
 
+	mutex_lock(&chip->reg_lock);
+	for(portnum=0; portnum<4;portnum++)
+	{
+	    err = mv88e6xxx_port_read(chip, portnum, MV88E6XXX_PORT_LED_CONTROL, &pleddata[portnum]);
+	    pr_info("port led info:0x%x",pleddata[portnum]);
+	    if(err)
+		    break;
+	}
+	mutex_unlock(&chip->reg_lock);
+	if(err)
+		goto out;
+
 	return 0;
 
 out_mdio:
@@ -4027,6 +4046,10 @@ static void mv88e6xxx_remove(struct mdio_device *mdiodev)
 
 static const struct of_device_id mv88e6xxx_of_match[] = {
 	{
+		.compatible = "marvell,mv88e6176",
+		.data = &mv88e6xxx_table[MV88E6176],
+	},
+	{
 		.compatible = "marvell,mv88e6085",
 		.data = &mv88e6xxx_table[MV88E6085],
 	},
@@ -4043,7 +4066,7 @@ static struct mdio_driver mv88e6xxx_driver = {
 	.probe	= mv88e6xxx_probe,
 	.remove = mv88e6xxx_remove,
 	.mdiodrv.driver = {
-		.name = "mv88e6085",
+		.name = "mv88e6176",
 		.of_match_table = mv88e6xxx_of_match,
 	},
 };
