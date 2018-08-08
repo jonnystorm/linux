@@ -42,8 +42,6 @@
 #include "ptp.h"
 #include "serdes.h"
 
-static u16 pleddata[4];
-
 static void assert_reg_lock(struct mv88e6xxx_chip *chip)
 {
 	if (unlikely(!mutex_is_locked(&chip->reg_lock))) {
@@ -956,41 +954,6 @@ static int mv88e6xxx_get_mac_eee(struct dsa_switch *ds, int port,
 {
 	/* Nothing to do on the port's MAC */
 	return 0;
-}
-
-static int mv88e6xxx_set_phys_id(struct dsa_switch *ds, int port,
-				 enum ethtool_phys_id_state state)
-{
-	struct mv88e6xxx_chip *chip = ds->priv;
-	int err;
-	u16 data;
-
-	if(!mv88e6xxx_has(chip, MV88E6XXX_FLAG_PHYSID))
-		return -EOPNOTSUPP;
-	mutex_lock(&chip->reg_lock);
-
-	switch (state)
-	{
-		case ETHTOOL_ID_ACTIVE:
-			err=mv88e6xxx_port_write(chip, port, MV88E6XXX_PORT_LED_CONTROL, 0x10DD);
-			break;
-		case ETHTOOL_ID_ON:
-			err=mv88e6xxx_port_write(chip, port, MV88E6XXX_PORT_LED_CONTROL, 0x10DD);
-			break;
-		case ETHTOOL_ID_OFF:
-			data = pleddata[port] & 0xff;
-			data |= 0x1000;
-			err=mv88e6xxx_port_write(chip, port, MV88E6XXX_PORT_LED_CONTROL, data);
-			break;
-		case ETHTOOL_ID_INACTIVE:
-			data = pleddata[port] & 0xff;
-			data |= 0x1000;
-			err=mv88e6xxx_port_write(chip, port, MV88E6XXX_PORT_LED_CONTROL, data);
-			break;
-
-	}
-	mutex_unlock(&chip->reg_lock);
-	return err;
 }
 
 static int mv88e6xxx_set_mac_eee(struct dsa_switch *ds, int port,
@@ -4174,7 +4137,6 @@ static const struct dsa_switch_ops mv88e6xxx_switch_ops = {
 	.set_eeprom		= mv88e6xxx_set_eeprom,
 	.get_regs_len		= mv88e6xxx_get_regs_len,
 	.get_regs		= mv88e6xxx_get_regs,
-	.set_phys_id		= mv88e6xxx_set_phys_id,
 	.set_ageing_time	= mv88e6xxx_set_ageing_time,
 	.port_bridge_join	= mv88e6xxx_port_bridge_join,
 	.port_bridge_leave	= mv88e6xxx_port_bridge_leave,
@@ -4235,7 +4197,6 @@ static int mv88e6xxx_probe(struct mdio_device *mdiodev)
 	struct mv88e6xxx_chip *chip;
 	u32 eeprom_len;
 	int err;
-	int portnum;
 
 	compat_info = of_device_get_match_data(dev);
 	if (!compat_info)
@@ -4315,18 +4276,6 @@ static int mv88e6xxx_probe(struct mdio_device *mdiodev)
 	err = mv88e6xxx_register_switch(chip);
 	if (err)
 		goto out_mdio;
-
-	mutex_lock(&chip->reg_lock);
-	for(portnum=0; portnum<4;portnum++)
-	{
-	    err = mv88e6xxx_port_read(chip, portnum, MV88E6XXX_PORT_LED_CONTROL, &pleddata[portnum]);
-	    pr_info("port led info:0x%x",pleddata[portnum]);
-	    if(err)
-		    break;
-	}
-	mutex_unlock(&chip->reg_lock);
-	if(err)
-		goto out;
 
 	return 0;
 
